@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>방명록</title>
+<style>
+  :root{ --pw:800px; --ph:447px; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;
+    font-family:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+  .wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:20px 12px}
+  header{display:flex;flex-direction:column;align-items:center;gap:12px}
+  header img{height:22px;width:auto;display:block}
+  header .meta{display:flex;gap:12px;align-items:baseline;font-size:13px;letter-spacing:.04em}
+  header .meta span:last-child{color:#8a8a8a;font-variant-numeric:tabular-nums}
+
+  .stage{position:relative;width:var(--pw);height:calc(var(--ph)*2);perspective:calc(var(--ph)*6);
+    touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer}
+  .base{position:absolute;left:0;right:0;top:var(--ph);height:var(--ph);border-radius:0 0 4px 4px;overflow:hidden;background:#b9b6b0}
+  .base img{width:100%;height:100%;object-fit:cover;display:block}
+
+  .leaf{position:absolute;left:0;top:var(--ph);width:var(--pw);height:var(--ph);
+    transform-origin:50% 0;transform-style:preserve-3d;transform:rotateX(0deg);
+    transition:transform .8s cubic-bezier(.35,.6,.2,1)}
+  .leaf.nodrag{transition:none}
+  .face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;background:#fff;overflow:hidden}
+  .face img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-user-drag:none}
+  .front{border-radius:0 0 4px 4px}
+  .back{transform:rotateX(180deg);border-radius:4px 4px 0 0}
+  .front:not(.cover)::before{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:#e2e2e2;z-index:2}
+  .face::after{content:"";position:absolute;inset:0;background:#000;opacity:var(--shade,0);pointer-events:none;z-index:3}
+
+  .controls{display:flex;align-items:center;gap:20px;font-size:13px;color:#8a8a8a;font-variant-numeric:tabular-nums}
+  .btn{background:none;border:0;padding:6px;color:#fff;cursor:pointer;display:grid;place-items:center;opacity:.85}
+  .btn:hover{opacity:1}
+  .btn:disabled{opacity:.2;cursor:default}
+  .btn svg{width:20px;height:20px}
+  .count{min-width:56px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="img/logo.svg" alt="FRAMES">
+    <div class="meta"><span>방명록</span><span>2026.11.2 – 11.8</span></div>
+  </header>
+
+  <div class="stage" id="stage" aria-label="방명록">
+    <div class="base"><img src="img/cover_back.jpg" alt="뒷표지"></div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="prev" aria-label="이전 장"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg></button>
+    <div class="count" id="count">—</div>
+    <button class="btn" id="next" aria-label="다음 장"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const S = 22; // number of scanned spreads
+  const pad = n => String(n).padStart(2,'0');
+  // leaf faces: front shown in the lower half, back shown in the upper half once turned
+  const leaves = [{front:'img/cover_front.jpg', back:'img/s01t.jpg', cover:true}];
+  for(let k=1;k<=S;k++){
+    leaves.push({front:`img/s${pad(k)}b.jpg`, back: k<S ? `img/s${pad(k+1)}t.jpg` : null});
+  }
+  const N = leaves.length;
+  const stage = document.getElementById('stage');
+  const els = leaves.map((L,i)=>{
+    const d=document.createElement('div'); d.className='leaf';
+    const f=document.createElement('div'); f.className='face front'+(L.cover?' cover':'');
+    f.innerHTML=`<img src="${L.front}" alt="" draggable="false" ${i>3?'loading="lazy"':''}>`;
+    const b=document.createElement('div'); b.className='face back'+(L.back?'':' blank');
+    if(L.back) b.innerHTML=`<img src="${L.back}" alt="" draggable="false" ${i>3?'loading="lazy"':''}>`;
+    d.append(f,b); stage.appendChild(d); return d;
+  });
+
+  let cur = 0;           // number of turned leaves
+  const ang = new Array(N).fill(0);
+  const busy = new Set();
+
+  function zFor(i){ return ang[i] > 90 ? 100 + i : 100 + (N - i); }
+  function setAngle(i, a, animate){
+    ang[i]=a; const el=els[i];
+    el.classList.toggle('nodrag', !animate);
+    el.style.transform=`rotateX(${a}deg)`;
+    const shade = Math.sin(a*Math.PI/180)*0.35;
+    el.style.setProperty('--shade', animate ? 0 : shade.toFixed(3));
+  }
+  function render(){
+    els.forEach((el,i)=>{ if(!busy.has(i)) el.style.zIndex = zFor(i); });
+    const c=document.getElementById('count');
+    c.textContent = cur===0 ? '—' : cur===N ? '—' : `${cur} / ${N-1}`;
+    document.getElementById('prev').disabled = cur===0;
+    document.getElementById('next').disabled = cur===N;
+  }
+  function animateShade(i, from, to){
+    const el=els[i], t0=performance.now(), D=900;
+    busy.add(i); el.style.zIndex=2000;
+    (function step(t){
+      const p=Math.min(1,(t-t0)/D), e=1-Math.pow(1-p,2.2);
+      const a=from+(to-from)*e;
+      el.style.setProperty('--shade',(Math.sin(a*Math.PI/180)*0.35).toFixed(3));
+      if(p<1) requestAnimationFrame(step); else { busy.delete(i); el.style.setProperty('--shade',0); render(); }
+    })(t0);
+  }
+  function turn(i, forward){
+    const from=ang[i], to=forward?180:0;
+    setAngle(i,to,true); animateShade(i,from,to);
+  }
+  function next(){ if(cur<N){ turn(cur,true); cur++; render(); } }
+  function prev(){ if(cur>0){ cur--; turn(cur,false); render(); } }
+  function goTo(n){
+    n=Math.max(0,Math.min(N,n)); let d=0;
+    while(cur<n){ const i=cur; setTimeout(()=>turn(i,true),d); cur++; d+=70; }
+    while(cur>n){ cur--; const i=cur; setTimeout(()=>turn(i,false),d); d+=70; }
+    render();
+  }
+
+  // sizing
+  function size(){
+    const vw=innerWidth, vh=innerHeight;
+    const chrome = vw<560 ? 190 : 210;
+    let pw=Math.min(vw-24, 1000, ((vh-chrome)/2)*1400/822);
+    const ph=pw*822/1400;
+    document.documentElement.style.setProperty('--pw',pw+'px');
+    document.documentElement.style.setProperty('--ph',ph+'px');
+  }
+  addEventListener('resize',size); size();
+
+  // controls
+  document.getElementById('next').onclick=next;
+  document.getElementById('prev').onclick=prev;
+  addEventListener('keydown',e=>{
+    if(['ArrowDown','ArrowRight','PageDown',' '].includes(e.key)){ e.preventDefault(); next(); }
+    else if(['ArrowUp','ArrowLeft','PageUp'].includes(e.key)){ e.preventDefault(); prev(); }
+    else if(e.key==='Home') goTo(0); else if(e.key==='End') goTo(N);
+  });
+  let wheelLock=0;
+  stage.addEventListener('wheel',e=>{
+    e.preventDefault(); const now=Date.now(); if(now<wheelLock||Math.abs(e.deltaY)<8) return;
+    wheelLock=now+550; e.deltaY>0?next():prev();
+  },{passive:false});
+  addEventListener('wheel',e=>{ if(!stage.contains(e.target)) e.preventDefault(); },{passive:false});
+
+  // drag / tap
+  let drag=null;
+  stage.addEventListener('pointerdown',e=>{
+    const r=stage.getBoundingClientRect(), ph=r.height/2;
+    drag={y0:e.clientY, lower:(e.clientY-r.top)>ph, ph, idx:null, moved:false, id:e.pointerId};
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove',e=>{
+    if(!drag) return;
+    const dy=e.clientY-drag.y0;
+    if(!drag.moved && Math.abs(dy)<8) return;
+    if(!drag.moved){
+      drag.moved=true;
+      if(dy<0 && cur<N) drag.idx=cur, drag.fwd=true;
+      else if(dy>0 && cur>0) drag.idx=cur-1, drag.fwd=false;
+      else return;
+      els[drag.idx].style.zIndex=2000;
+    }
+    if(drag.idx==null) return;
+    let a = drag.fwd ? (-dy/(drag.ph*1.6))*180 : 180-(dy/(drag.ph*1.6))*180;
+    a=Math.max(0,Math.min(180,a));
+    setAngle(drag.idx,a,false);
+  });
+  function end(e){
+    if(!drag) return;
+    const d=drag; drag=null;
+    if(!d.moved){ d.lower?next():prev(); return; }
+    if(d.idx==null) return;
+    const a=ang[d.idx];
+    if(d.fwd){ if(a>45){ turn(d.idx,true); cur++; } else turn(d.idx,false); }
+    else { if(a<135){ turn(d.idx,false); cur--; } else turn(d.idx,true); }
+    render();
+  }
+  stage.addEventListener('pointerup',end);
+  stage.addEventListener('pointercancel',end);
+
+  render();
+  // warm up the next few images
+  els.slice(0,6).forEach(el=>el.querySelectorAll('img').forEach(im=>im.loading='eager'));
+})();
+</script>
+</body>
+</html>
